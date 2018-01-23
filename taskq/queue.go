@@ -16,17 +16,16 @@ func (t TaskFunc) Execute() {
 }
 
 type Queue struct {
-	queue           chan Task
-	wg              *sync.WaitGroup
-	cancel, closing schan
-	closeFn         func()
+	queue   chan Task
+	wg      *sync.WaitGroup
+	closing schan
+	closeFn func()
 }
 
 type schan chan struct{}
 
 func New(capacity, count int) *Queue {
 	q := make(chan Task, capacity)
-	cancel := make(schan)
 	closing := make(schan)
 	sigClose := make(schan, 1)
 	var wg sync.WaitGroup
@@ -35,8 +34,6 @@ func New(capacity, count int) *Queue {
 		for {
 			select {
 			case <-closing:
-				return
-			case <-cancel:
 				return
 			default:
 			}
@@ -56,11 +53,13 @@ func New(capacity, count int) *Queue {
 		wg.Add(1)
 		go work(q)
 	}
+	wg.Add(1)
 	go func() { // moderator
+		defer wg.Done()
 		<-sigClose
 		close(closing)
 	}()
-	return &Queue{q, &wg, cancel, closing, func() {
+	return &Queue{q, &wg, closing, func() {
 		select {
 		case sigClose <- struct{}{}:
 		default:
@@ -98,15 +97,6 @@ func (q *Queue) TryPush(task Task) bool {
 }
 
 func (q *Queue) Wait() {
-	q.wg.Wait()
-}
-
-func (q *Queue) Cancel() {
-	close(q.cancel)
-}
-
-func (q *Queue) CancelAndWait() {
-	close(q.cancel)
 	q.wg.Wait()
 }
 

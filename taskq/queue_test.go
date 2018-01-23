@@ -43,33 +43,3 @@ func TestQueuePushClose(t *testing.T) {
 	}
 	q.CloseAndWait()
 }
-
-func TestQueuePushCancelClose(t *testing.T) {
-	t.Parallel()
-	a := uint64(0)
-	q := taskq.New(1000, workerCount)
-	defer q.Close()
-	go func() {
-		for i := 0; i < 10000; i++ {
-			q.Push(taskq.TaskFunc(func() {
-				atomic.AddUint64(&a, 1)
-			}))
-		}
-	}()
-	q.CancelAndWait()
-}
-
-func TestQueueTryPushCancelClose(t *testing.T) {
-	t.Parallel()
-	a := uint64(0)
-	q := taskq.New(1000, workerCount)
-	defer q.Close()
-	go func() {
-		for i := 0; i < 10000; i++ {
-			q.TryPush(taskq.TaskFunc(func() {
-				atomic.AddUint64(&a, 1)
-			}))
-		}
-	}()
-	q.CancelAndWait()
-}
