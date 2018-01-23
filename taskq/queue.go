@@ -19,6 +19,7 @@ type Queue struct {
 	queue           chan Task
 	wg              *sync.WaitGroup
 	cancel, closing schan
+	closeFn         func()
 }
 
 type schan chan struct{}
@@ -27,6 +28,7 @@ func New(capacity, count int) *Queue {
 	q := make(chan Task, capacity)
 	cancel := make(schan)
 	closing := make(schan)
+	sigClose := make(schan, 1)
 	var wg sync.WaitGroup
 	work := func(tasks <-chan Task) {
 		defer wg.Done()
@@ -40,7 +42,7 @@ func New(capacity, count int) *Queue {
 			}
 
 			select {
-			case <-closing: // below clause may block; this is an `exit' point for worker routine
+			case <-closing:
 				return
 			case task, ok := <-tasks:
 				if !ok {
@@ -54,10 +56,24 @@ func New(capacity, count int) *Queue {
 		wg.Add(1)
 		go work(q)
 	}
-	return &Queue{q, &wg, cancel, closing}
+	go func() { // moderator
+		<-sigClose
+		close(closing)
+	}()
+	return &Queue{q, &wg, cancel, closing, func() {
+		select {
+		case sigClose <- struct{}{}:
+		default:
+		}
+	}}
 }
 
 func (q *Queue) Push(task Task) {
+	select {
+	case <-q.closing:
+		return
+	default:
+	}
 	select {
 	case <-q.closing:
 		return
@@ -66,6 +82,11 @@ func (q *Queue) Push(task Task) {
 }
 
 func (q *Queue) TryPush(task Task) bool {
+	select {
+	case <-q.closing:
+		return false
+	default:
+	}
 	select {
 	case <-q.closing:
 		return false
@@ -90,17 +111,17 @@ func (q *Queue) CancelAndWait() {
 }
 
 func (q *Queue) Close() {
-	close(q.closing)
+	q.closeFn()
 }
 
 func (q *Queue) CloseAndWait() {
-	close(q.closing)
+	q.closeFn()
 	q.wg.Wait()
 }
 
 func (q *Queue) CloseAndWaitTimeout(d time.Duration) bool {
+	q.closeFn()
 	ch := make(schan)
-	close(q.closing)
 	go func() {
 		q.wg.Wait()
 		close(ch)
