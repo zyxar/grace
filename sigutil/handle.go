@@ -6,20 +6,20 @@ import (
 )
 
 type Handle struct {
-	s  SigChan
+	sc chan Signal
 	wg *sync.WaitGroup
 }
 
 func Watch(fn func(Signal), signals ...Signal) *Handle {
-	s := make(SigChan, 1)
+	sc := make(chan Signal, 1)
 	wg := &sync.WaitGroup{}
-	signal.Notify(s, signals...)
+	signal.Notify(sc, signals...)
 	wg.Add(1)
 	go func() {
 	loop:
 		for {
 			select {
-			case c, ok := <-s:
+			case c, ok := <-sc:
 				if ok {
 					fn(c)
 				} else {
@@ -29,10 +29,11 @@ func Watch(fn func(Signal), signals ...Signal) *Handle {
 		}
 		wg.Done()
 	}()
-	return &Handle{s, wg}
+	return &Handle{sc, wg}
 }
 
 func (s *Handle) Close() {
-	s.s.Close()
+	signal.Stop(s.sc)
+	close(s.sc)
 	s.wg.Wait()
 }

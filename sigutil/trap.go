@@ -35,19 +35,11 @@ const (
 )
 
 type Signal = os.Signal
-type SigChan chan Signal
 
-func Trap(signals ...Signal) (s SigChan) {
-	s = make(SigChan, 1)
+func Trap(cb func(Signal), signals ...Signal) {
+	s := make(chan Signal, 1)
 	signal.Notify(s, signals...)
-	return
-}
-
-func (s SigChan) Wait() Signal {
-	return <-s
-}
-
-func (s SigChan) Close() {
+	cb(<-s)
 	signal.Stop(s)
 	close(s)
 }
