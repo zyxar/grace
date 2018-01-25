@@ -1,8 +1,15 @@
 package taskq
 
 import (
+	"errors"
 	"sync"
 	"time"
+)
+
+var (
+	ErrQueueClosed   = errors.New("task queue closed")
+	ErrQueueCanceled = errors.New("task queue canceled")
+	ErrQueueBusy     = errors.New("task queue busy")
 )
 
 type Task interface {
@@ -11,35 +18,34 @@ type Task interface {
 
 type TaskFunc func()
 
-func (t TaskFunc) Execute() {
-	t()
-}
+func (t TaskFunc) Execute() { t() }
 
 type Queue struct {
-	queue   chan Task
-	wg      *sync.WaitGroup
-	closing schan
-	closeFn func()
+	queue  chan Task
+	cancel schan
+	wg     *sync.WaitGroup
+	mutex  *sync.RWMutex
+	once   *sync.Once
+	closed bool // protected by mutex
 }
 
 type schan chan struct{}
 
 func New(capacity, count int) *Queue {
 	q := make(chan Task, capacity)
-	closing := make(schan)
-	sigClose := make(schan, 1)
 	var wg sync.WaitGroup
+	cancel := make(schan)
 	work := func(tasks <-chan Task) {
 		defer wg.Done()
 		for {
 			select {
-			case <-closing:
+			case <-cancel:
 				return
 			default:
 			}
 
 			select {
-			case <-closing:
+			case <-cancel:
 				return
 			case task, ok := <-tasks:
 				if !ok {
@@ -53,73 +59,74 @@ func New(capacity, count int) *Queue {
 		wg.Add(1)
 		go work(q)
 	}
-	wg.Add(1)
-	go func() { // moderator
-		defer wg.Done()
-		<-sigClose
-		close(closing)
-	}()
-	return &Queue{q, &wg, closing, func() {
-		select {
-		case sigClose <- struct{}{}:
-		default:
-		}
-	}}
+	return &Queue{q, cancel, &wg, &sync.RWMutex{}, &sync.Once{}, false}
 }
 
-func (q *Queue) Push(task Task) {
-	select {
-	case <-q.closing:
-		return
-	default:
-	}
-	select {
-	case <-q.closing:
-		return
-	case q.queue <- task:
-	}
+func (q *Queue) close() {
+	q.mutex.Lock()
+	defer q.mutex.Unlock()
+	q.closed = true
+	close(q.queue)
 }
 
-func (q *Queue) TryPush(task Task) bool {
-	select {
-	case <-q.closing:
-		return false
-	default:
-	}
-	select {
-	case <-q.closing:
-		return false
-	case q.queue <- task:
-		return true
-	default:
-		return false
-	}
+func (q *Queue) Close() {
+	q.once.Do(q.close)
+}
+
+func (q *Queue) Cancel() {
+	q.once.Do(func() {
+		close(q.cancel)
+	})
 }
 
 func (q *Queue) Wait() {
 	q.wg.Wait()
 }
 
-func (q *Queue) Close() {
-	q.closeFn()
-}
-
-func (q *Queue) CloseAndWait() {
-	q.closeFn()
-	q.wg.Wait()
-}
-
-func (q *Queue) CloseAndWaitTimeout(d time.Duration) bool {
-	q.closeFn()
-	ch := make(schan)
+func (q *Queue) WaitTimeout(d time.Duration) bool {
+	end := make(schan)
 	go func() {
 		q.wg.Wait()
-		close(ch)
+		close(end)
 	}()
 	select {
-	case <-ch:
+	case <-end:
 		return true
 	case <-time.After(d):
 		return false
+	}
+}
+
+func (q *Queue) Push(task Task) error {
+	select {
+	case <-q.cancel:
+		return ErrQueueCanceled
+	default:
+	}
+	q.mutex.RLock()
+	defer q.mutex.RUnlock()
+	if q.closed {
+		return ErrQueueClosed
+	}
+	q.queue <- task
+	return nil
+}
+
+func (q *Queue) TryPush(task Task) error {
+	select {
+	case <-q.cancel:
+		return ErrQueueCanceled
+	default:
+	}
+	q.mutex.RLock()
+	defer q.mutex.RUnlock()
+	if q.closed {
+		return ErrQueueClosed
+	}
+	select {
+	case q.queue <- task:
+		return nil
+	default:
+		return ErrQueueBusy
 	}
 }
