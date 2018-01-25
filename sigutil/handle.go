@@ -1,16 +1,16 @@
-package sig
+package sigutil
 
 import (
 	"os/signal"
 	"sync"
 )
 
-type SigHandle struct {
+type Handle struct {
 	s  SigChan
 	wg *sync.WaitGroup
 }
 
-func Watch(fn func(Signal), signals ...Signal) *SigHandle {
+func Watch(fn func(Signal), signals ...Signal) *Handle {
 	s := make(SigChan, 1)
 	wg := &sync.WaitGroup{}
 	signal.Notify(s, signals...)
@@ -29,10 +29,10 @@ func Watch(fn func(Signal), signals ...Signal) *SigHandle {
 		}
 		wg.Done()
 	}()
-	return &SigHandle{s, wg}
+	return &Handle{s, wg}
 }
 
-func (s *SigHandle) Close() {
+func (s *Handle) Close() {
 	s.s.Close()
 	s.wg.Wait()
 }

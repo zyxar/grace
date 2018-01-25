@@ -1,4 +1,4 @@
-package sig
+package sigutil
 
 import (
 	"os"
