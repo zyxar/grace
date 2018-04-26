@@ -21,12 +21,13 @@ type TaskFunc func()
 func (t TaskFunc) Execute() { t() }
 
 type Queue struct {
-	queue  chan Task
-	cancel schan
-	wg     *sync.WaitGroup
-	mutex  *sync.RWMutex
-	once   *sync.Once
-	closed bool // protected by mutex
+	queue      chan Task
+	cancel     schan
+	wg         *sync.WaitGroup
+	mutex      *sync.RWMutex
+	onceCancel *sync.Once
+	onceClose  *sync.Once
+	closed     bool // protected by mutex
 }
 
 type schan chan struct{}
@@ -59,22 +60,20 @@ func New(capacity, count int) *Queue {
 		wg.Add(1)
 		go work(q)
 	}
-	return &Queue{q, cancel, &wg, &sync.RWMutex{}, &sync.Once{}, false}
-}
-
-func (q *Queue) close() {
-	q.mutex.Lock()
-	defer q.mutex.Unlock()
-	q.closed = true
-	close(q.queue)
+	return &Queue{q, cancel, &wg, &sync.RWMutex{}, &sync.Once{}, &sync.Once{}, false}
 }
 
 func (q *Queue) Close() {
-	q.once.Do(q.close)
+	q.onceClose.Do(func() {
+		q.mutex.Lock()
+		defer q.mutex.Unlock()
+		q.closed = true
+		close(q.queue)
+	})
 }
 
 func (q *Queue) Cancel() {
-	q.once.Do(func() {
+	q.onceCancel.Do(func() {
 		close(q.cancel)
 	})
 }
