@@ -1,6 +1,7 @@
 package fork
 
 import (
+	"flag"
 	"fmt"
 	"log"
 	"net/http"
@@ -8,6 +9,60 @@ import (
 
 	"github.com/zyxar/grace/sigutil"
 )
+
+func ExampleGetArgs() {
+	args := GetArgs(nil, func(arg string) bool {
+		return arg == "daemon"
+	})
+	program, _ := os.Executable() // go1.8+
+	if err := Daemonize(program, &Option{
+		Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr,
+	}, args...); err != nil {
+		panic(err)
+	}
+}
+
+func ExampleDaemonize() {
+	getArgs := func() []string {
+		if flag.NFlag() == 0 {
+			return flag.Args()
+		}
+		flag.Set("daemon", "false")
+		args := make([]string, 0, flag.NFlag()+flag.NArg())
+		flag.Visit(func(f *flag.Flag) {
+			args = append(args, "-"+f.Name+"="+f.Value.String())
+		})
+		return append(args, flag.Args()...)
+	}
+
+	var daemon = flag.Bool("daemon", false, "enable daemon mode")
+	flag.Parse()
+	if *daemon {
+		stderr, err := os.OpenFile("stderr.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil {
+			panic(err)
+		}
+		defer stderr.Close()
+		program, _ := os.Executable() // go1.8+
+		if err = Daemonize(program, &Option{
+			Stdout: os.Stdout, Stderr: stderr,
+		}, getArgs()...); err != nil {
+			panic(err)
+		}
+		return
+	}
+
+	if os.Getppid() == 1 { // process parent is init, or uses env variable
+		os.Stdout.Close()
+		defer os.Stderr.Close()
+		os.Stdin.Close()
+		log.Println("std fds closed in daemon mode")
+	}
+
+	sigutil.Trap(func(s sigutil.Signal) {
+		os.Exit(0)
+	}, sigutil.SIGINT, sigutil.SIGTERM)
+}
 
 func ExampleListen() {
 	ln, err := Listen("tcp", "127.0.0.1:12345")
