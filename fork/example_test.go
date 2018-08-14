@@ -104,3 +104,59 @@ func ExampleReload() {
 		os.Exit(0)
 	}, sigutil.SIGINT, sigutil.SIGTERM)
 }
+
+func ExampleReload_multiple() {
+	ln, err := Listen("tcp", "127.0.0.1:12345")
+	if err != nil {
+		log.Println(err)
+		os.Exit(1)
+	}
+	defer ln.Close()
+
+	ln1, err := Listen("tcp", "127.0.0.1:12346")
+	if err != nil {
+		log.Println(err)
+		os.Exit(1)
+	}
+	defer ln1.Close()
+
+	ln2, err := Listen("tcp", "127.0.0.1:12347")
+	if err != nil {
+		log.Println(err)
+		os.Exit(1)
+	}
+	defer ln2.Close()
+
+	srv := &http.Server{Addr: ln.Addr().String()}
+	srv.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, "1:%v\n", os.Getpid())
+	})
+	go func() { log.Fatal(srv.Serve(ln)) }()
+
+	srv1 := &http.Server{Addr: ln1.Addr().String()}
+	srv1.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, "2:%v\n", os.Getpid())
+	})
+	go func() { log.Fatal(srv1.Serve(ln1)) }()
+
+	srv2 := &http.Server{Addr: ln2.Addr().String()}
+	srv2.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, "3:%v\n", os.Getpid())
+	})
+	go func() { log.Fatal(srv2.Serve(ln2)) }()
+
+	sigutil.Watch(func(sigutil.Signal) {
+		pid, err := Reload(ln, ln1, ln2)
+		if err != nil {
+			log.Println(err)
+			return
+		}
+		log.Println("reloaded as", pid)
+		os.Exit(0)
+	}, sigutil.SIGHUP)
+
+	sigutil.Trap(func(s sigutil.Signal) {
+		log.Println("killed by", s)
+		os.Exit(0)
+	}, sigutil.SIGINT, sigutil.SIGTERM)
+}
