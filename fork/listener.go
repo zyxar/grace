@@ -31,7 +31,7 @@ func Listen(network, address string) (l ReloadableListener, err error) {
 	switch network {
 	case "tcp", "tcp4", "tcp6":
 		addr, err = net.ResolveTCPAddr(network, address)
-	case "unix", "unixgram", "unixpacket":
+	case "unix", "unixpacket":
 		addr, err = net.ResolveUnixAddr(network, address)
 	default:
 		err = fmt.Errorf("network `%s' unsupported", network)
@@ -82,6 +82,7 @@ func Reload(listeners ...ReloadableListener) (int, error) {
 			return -1, err
 		}
 		files = append(files, f.Fd())
+		// envListeners[f.Name()] = i + 3
 		envListeners[filename(ln.Addr())] = i + 3
 	}
 	b, err := json.Marshal(envListeners)
@@ -99,6 +100,7 @@ func Reload(listeners ...ReloadableListener) (int, error) {
 	})
 }
 
-func filename(addr net.Addr) string {
-	return addr.Network() + "://" + addr.String()
+// same style of net/fd_unix.go: *netFD.name()
+func filename(laddr net.Addr) string {
+	return laddr.Network() + ":" + laddr.String() + "->"
 }
