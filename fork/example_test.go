@@ -44,23 +44,16 @@ func ExampleDaemonize() {
 		}
 		defer stderr.Close()
 		program, _ := os.Executable() // go1.8+
-		if err = Daemonize(program, &Option{
-			Stdout: os.Stdout, Stderr: stderr,
-		}, getArgs()...); err != nil {
+		if err = Daemonize(program, &Option{Stderr: stderr}, getArgs()...); err != nil {
 			panic(err)
 		}
 		return
 	}
 
-	if os.Getppid() == 1 { // process parent is init, or uses env variable
-		os.Stdout.Close()
-		defer os.Stderr.Close()
-		os.Stdin.Close()
-		log.Println("std fds closed in daemon mode")
-	}
+	defer os.Stderr.Close()
 
 	sigutil.Trap(func(s sigutil.Signal) {
-		os.Exit(0)
+		log.Println("[KILLED] by signal", s)
 	}, sigutil.SIGINT, sigutil.SIGTERM)
 }
 
@@ -78,7 +71,7 @@ func ExampleListen() {
 	go func() { log.Fatal(srv.Serve(ln)) }()
 
 	sigutil.Trap(func(s sigutil.Signal) {
-		os.Exit(0)
+		log.Println("[KILLED] by signal", s)
 	}, sigutil.SIGINT, sigutil.SIGTERM)
 }
 
@@ -90,19 +83,19 @@ func ExampleReload() {
 	}
 	defer ln.Close()
 
-	sigutil.Watch(func(s sigutil.Signal) {
-		pid, err := Reload(ln)
-		if err != nil {
-			log.Println(err)
-			return
-		}
-		log.Println("reloaded as", pid)
-		os.Exit(0)
-	}, sigutil.SIGHUP)
-
 	sigutil.Trap(func(s sigutil.Signal) {
-		os.Exit(0)
-	}, sigutil.SIGINT, sigutil.SIGTERM)
+		switch s {
+		case sigutil.SIGHUP:
+			pid, err := Reload(ln)
+			if err != nil {
+				log.Println(err)
+				return
+			}
+			log.Printf("[RELOAD] %d -> %d", os.Getpid(), pid)
+		default:
+			log.Println("[KILLED] by signal", s)
+		}
+	}, sigutil.SIGHUP, sigutil.SIGINT, sigutil.SIGTERM)
 }
 
 func ExampleReload_multiple() {
@@ -145,18 +138,17 @@ func ExampleReload_multiple() {
 	})
 	go func() { log.Fatal(srv2.Serve(ln2)) }()
 
-	sigutil.Watch(func(sigutil.Signal) {
-		pid, err := Reload(ln, ln1, ln2)
-		if err != nil {
-			log.Println(err)
-			return
-		}
-		log.Println("reloaded as", pid)
-		os.Exit(0)
-	}, sigutil.SIGHUP)
-
 	sigutil.Trap(func(s sigutil.Signal) {
-		log.Println("killed by", s)
-		os.Exit(0)
-	}, sigutil.SIGINT, sigutil.SIGTERM)
+		switch s {
+		case sigutil.SIGHUP:
+			pid, err := Reload(ln, ln1, ln2)
+			if err != nil {
+				log.Println(err)
+				return
+			}
+			log.Printf("[RELOAD] %d -> %d", os.Getpid(), pid)
+		default:
+			log.Println("[KILLED] by signal", s)
+		}
+	}, sigutil.SIGHUP, sigutil.SIGINT, sigutil.SIGTERM)
 }
