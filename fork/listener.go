@@ -34,17 +34,17 @@ func Listen(network, address string) (l ReloadableListener, err error) {
 	case "unix", "unixgram", "unixpacket":
 		addr, err = net.ResolveUnixAddr(network, address)
 	default:
-		err = fmt.Errorf("network %q unsupported", network)
+		err = fmt.Errorf("network `%s' unsupported", network)
 	}
 	if err != nil {
 		return nil, err
 	}
-	filename := fmt.Sprintf("%s:%s", addr.Network(), addr.String())
+	filename := filename(addr)
 	var ln net.Listener
 	if fd, ok := inheritedFDs[filename]; ok {
 		file := os.NewFile(fd, filename)
 		if file == nil {
-			return nil, fmt.Errorf("unable to create listener file %v", filename)
+			return nil, fmt.Errorf("unable to create listener file %s", filename)
 		}
 		ln, err = net.FileListener(file)
 		if err != nil {
@@ -82,8 +82,7 @@ func Reload(listeners ...ReloadableListener) (int, error) {
 			return -1, err
 		}
 		files = append(files, f.Fd())
-		filename := fmt.Sprintf("%s:%s", ln.Addr().Network(), ln.Addr().String())
-		envListeners[filename] = i + 3
+		envListeners[filename(ln.Addr())] = i + 3
 	}
 	b, err := json.Marshal(envListeners)
 	if err != nil {
@@ -98,4 +97,8 @@ func Reload(listeners ...ReloadableListener) (int, error) {
 		Env:   os.Environ(),
 		Files: files,
 	})
+}
+
+func filename(addr net.Addr) string {
+	return addr.Network() + "://" + addr.String()
 }
