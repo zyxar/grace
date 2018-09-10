@@ -29,8 +29,18 @@ func init() {
 func Listen(network, address string) (l ReloadableListener, err error) {
 	var addr net.Addr
 	switch network {
-	case "tcp", "tcp4", "tcp6":
-		addr, err = net.ResolveTCPAddr(network, address)
+	case "tcp", "tcp4":
+		tcpaddr, err1 := net.ResolveTCPAddr(network, address)
+		if tcpaddr != nil && tcpaddr.IP == nil {
+			tcpaddr.IP = net.IPv4zero
+		}
+		addr, err = tcpaddr, err1
+	case "tcp6":
+		tcpaddr, err1 := net.ResolveTCPAddr(network, address)
+		if tcpaddr != nil && tcpaddr.IP == nil {
+			tcpaddr.IP = net.IPv6zero
+		}
+		addr, err = tcpaddr, err1
 	case "unix", "unixpacket":
 		addr, err = net.ResolveUnixAddr(network, address)
 	default:
