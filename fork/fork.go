@@ -18,12 +18,13 @@ type Option struct {
 // it returns an error when encounter any failures;
 // upon success, it releases the child process and return nil;
 // the stdout, stderr of the child process are redirected intended;
-func Daemonize(bin string, opt *Option, args ...string) error {
+func Daemonize(bin string, opt *Option, args ...string) (int, error) {
 	cmd, err := spawn(bin, opt, args...)
 	if err != nil {
-		return err
+		return -1, err
 	}
-	return cmd.Process.Release()
+	pid := cmd.Process.Pid
+	return pid, cmd.Process.Release()
 }
 
 // Exec starts a new process specified by bin and waits for it to complete;

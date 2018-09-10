@@ -3,9 +3,11 @@ package fork
 import (
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 
 	"github.com/zyxar/grace/sigutil"
 )
@@ -15,7 +17,7 @@ func ExampleGetArgs() {
 		return arg == "daemon"
 	})
 	program, _ := os.Executable() // go1.8+
-	if err := Daemonize(program, &Option{
+	if _, err := Daemonize(program, &Option{
 		Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr,
 	}, args...); err != nil {
 		panic(err)
@@ -44,8 +46,10 @@ func ExampleDaemonize() {
 		}
 		defer stderr.Close()
 		program, _ := os.Executable() // go1.8+
-		if err = Daemonize(program, &Option{Stderr: stderr}, getArgs()...); err != nil {
+		if pid, err := Daemonize(program, &Option{Stderr: stderr}, getArgs()...); err != nil {
 			panic(err)
+		} else {
+			ioutil.WriteFile("example.pid", []byte(strconv.Itoa(pid)+"\n"), 0644)
 		}
 		return
 	}
