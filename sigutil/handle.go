@@ -16,16 +16,8 @@ func Watch(fn func(Signal), signals ...Signal) *Handle {
 	signal.Notify(sc, signals...)
 	wg.Add(1)
 	go func() {
-	loop:
-		for {
-			select {
-			case c, ok := <-sc:
-				if ok {
-					fn(c)
-				} else {
-					break loop
-				}
-			}
+		for c := range sc {
+			fn(c)
 		}
 		wg.Done()
 	}()
