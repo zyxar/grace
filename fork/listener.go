@@ -1,3 +1,7 @@
+// +build !windows
+// +build !js
+// +build !appengine
+
 package fork
 
 import (
