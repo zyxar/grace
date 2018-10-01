@@ -118,3 +118,57 @@ func Reload(listeners ...ReloadableListener) (int, error) {
 func filename(laddr net.Addr) string {
 	return laddr.Network() + ":" + laddr.String() + "->"
 }
+
+type ReloadablePacketConn interface {
+	net.PacketConn
+	File() (*os.File, error)
+}
+
+func ListenPacket(network, address string) (c ReloadablePacketConn, err error) {
+	var addr net.Addr
+	switch network {
+	case "udp", "udp4":
+		laddr, err := net.ResolveUDPAddr(network, address)
+		if err != nil {
+			return nil, err
+		}
+		if laddr != nil && laddr.IP == nil {
+			laddr.IP = net.IPv4zero
+		}
+		addr = laddr
+	case "udp6":
+		laddr, err := net.ResolveUDPAddr(network, address)
+		if err != nil {
+			return nil, err
+		}
+		if laddr != nil && laddr.IP == nil {
+			laddr.IP = net.IPv6zero
+		}
+		addr = laddr
+	case "unix", "unixgram":
+		addr, err = net.ResolveUnixAddr(network, address)
+	default:
+		err = fmt.Errorf("network `%s' unsupported", network)
+	}
+
+	filename := filename(addr)
+	var conn net.PacketConn
+	if fd, ok := inheritedFDs[filename]; ok {
+		file := os.NewFile(fd, filename)
+		if file == nil {
+			return nil, fmt.Errorf("unable to create conn file %s", filename)
+		}
+		conn, err = net.FilePacketConn(file)
+		if err != nil {
+			return nil, err
+		}
+		defer file.Close()
+	} else {
+		conn, err = net.ListenPacket(network, address)
+		if err != nil {
+			return
+		}
+	}
+	c = conn.(ReloadablePacketConn)
+	return
+}
