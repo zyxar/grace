@@ -3,8 +3,10 @@ package fork
 import (
 	"flag"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"strconv"
@@ -79,6 +81,41 @@ func ExampleListen() {
 	}, sigutil.SIGINT, sigutil.SIGTERM)
 }
 
+func ExampleListenPacket() {
+	conn, err := ListenPacket("udp4", "127.0.0.1:12345")
+	if err != nil {
+		log.Println(err)
+		os.Exit(1)
+	}
+	defer conn.Close()
+	done := make(chan struct{})
+	go func() {
+		buffer := make([]byte, 64*1024)
+		for {
+			select {
+			case <-done:
+				return
+			default:
+			}
+			_, err = io.CopyBuffer(os.Stdout, conn.(*net.UDPConn), buffer)
+			if err != nil {
+				select {
+				case <-done:
+					return
+				default:
+				}
+				log.Println(err)
+				continue
+			}
+		}
+	}()
+
+	sigutil.Trap(func(s sigutil.Signal) {
+		close(done)
+		log.Println("[KILLED] by signal", s)
+	}, sigutil.SIGINT, sigutil.SIGTERM)
+}
+
 func ExampleReload() {
 	ln, err := Listen("tcp", "127.0.0.1:12345")
 	if err != nil {
@@ -124,6 +161,12 @@ func ExampleReload_multiple() {
 	}
 	defer ln2.Close()
 
+	conn, err := ListenPacket("udp", "127.0.0.1:12345")
+	if err != nil {
+		log.Println(err)
+		os.Exit(1)
+	}
+
 	srv := &http.Server{Addr: ln.Addr().String()}
 	srv.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "1:%v\n", os.Getpid())
@@ -145,7 +188,7 @@ func ExampleReload_multiple() {
 	sigutil.Trap(func(s sigutil.Signal) {
 		switch s {
 		case sigutil.SIGHUP:
-			pid, err := Reload(ln, ln1, ln2)
+			pid, err := Reload(ln, ln1, ln2, conn)
 			if err != nil {
 				log.Println(err)
 				return

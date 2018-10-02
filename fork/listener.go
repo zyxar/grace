@@ -14,10 +14,23 @@ import (
 
 const envInheritListener = `FORK_INHERIT_LISTENER`
 
+// Reloadable can be reloaded when forking (by calling Reload()), typically ReloadableListener or ReloadablePacketConn
+// Reloadable provides underlying file descriptor through calling File(), which can be used in constructing
+// net.Listener or net.PacketConn via net.FileListener() or net.FilePacketConn(), respectively.
+type Reloadable interface {
+	File() (*os.File, error)
+}
+
 // ReloadableListener can be reloaded when forking, typically *net.TCPListener or *net.UnixListener
 type ReloadableListener interface {
 	net.Listener
-	File() (*os.File, error)
+	Reloadable
+}
+
+// ReloadablePacketConn can be reloaded when forking, typically *net.UDPConn or *net.UnixConn
+type ReloadablePacketConn interface {
+	net.PacketConn
+	Reloadable
 }
 
 var inheritedFDs = map[string]uintptr{} // readonly after init
@@ -77,8 +90,8 @@ func Listen(network, address string) (l ReloadableListener, err error) {
 
 // Reload forks and executes the same program (identical file path),
 // sending listener fd to be inherited by child process
-// Reload return child process id; or 0 and error upon any failures.
-func Reload(listeners ...ReloadableListener) (int, error) {
+// Reload return child process id; or -1 and error upon any failures.
+func Reload(reloadables ...Reloadable) (int, error) {
 	bin, err := os.Executable()
 	if err != nil {
 		return -1, err
@@ -88,16 +101,22 @@ func Reload(listeners ...ReloadableListener) (int, error) {
 		return -1, err
 	}
 	envListeners := make(map[string]int)
-	files := make([]uintptr, 3, 3+len(listeners))
+	files := make([]uintptr, 3, 3+len(reloadables))
 	files[0], files[1], files[2] = os.Stdin.Fd(), os.Stdout.Fd(), os.Stderr.Fd()
-	for i, ln := range listeners {
-		f, err := ln.File()
+	for i, re := range reloadables {
+		f, err := re.File()
 		if err != nil {
 			return -1, err
 		}
+		switch r := re.(type) { // envListeners[f.Name()] = i + 3
+		case ReloadableListener:
+			envListeners[filename(r.Addr())] = i + 3
+		case ReloadablePacketConn:
+			envListeners[filename(r.LocalAddr())] = i + 3
+		default:
+			continue // ignore
+		}
 		files = append(files, f.Fd())
-		// envListeners[f.Name()] = i + 3
-		envListeners[filename(ln.Addr())] = i + 3
 	}
 	b, err := json.Marshal(envListeners)
 	if err != nil {
@@ -117,11 +136,6 @@ func Reload(listeners ...ReloadableListener) (int, error) {
 // same style of net/fd_unix.go: *netFD.name()
 func filename(laddr net.Addr) string {
 	return laddr.Network() + ":" + laddr.String() + "->"
-}
-
-type ReloadablePacketConn interface {
-	net.PacketConn
-	File() (*os.File, error)
 }
 
 func ListenPacket(network, address string) (c ReloadablePacketConn, err error) {
