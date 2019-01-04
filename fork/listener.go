@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"syscall"
+	"time"
 )
 
 const envInheritListener = `FORK_INHERIT_LISTENER`
@@ -206,4 +207,28 @@ func ListenPacket(network, address string) (c ReloadablePacketConn, err error) {
 		c, err = net.ListenUnixgram("unixgram", addr.(*net.UnixAddr))
 	}
 	return
+}
+
+func TCPKeepAlive(ln net.Listener, period time.Duration) (*tcpKeepAliveListener, error) {
+	if l, ok := ln.(*net.TCPListener); ok {
+		return &tcpKeepAliveListener{l, period}, nil
+	}
+	return nil, fmt.Errorf("%T is not a *net.TCPListener", ln)
+}
+
+// tcpKeepAliveListener sets TCP keep-alive timeouts on accepted connections.
+// derived from stdlib
+type tcpKeepAliveListener struct {
+	*net.TCPListener
+	period time.Duration
+}
+
+func (ln tcpKeepAliveListener) Accept() (net.Conn, error) {
+	tc, err := ln.AcceptTCP()
+	if err != nil {
+		return nil, err
+	}
+	tc.SetKeepAlive(true)
+	tc.SetKeepAlivePeriod(ln.period)
+	return tc, nil
 }
