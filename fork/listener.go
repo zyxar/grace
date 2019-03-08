@@ -7,14 +7,18 @@ package fork
 import (
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"net"
 	"os"
+	"strconv"
+	"sync"
 	"syscall"
 	"time"
 )
 
 const envInheritListener = `FORK_INHERIT_LISTENER`
 const magicNumber = 3 // where listener FDs start from
+const pipeFilename = `FORK_PIPE`
 
 // Reloadable can be reloaded when forking (by calling Reload()), typically ReloadableListener or ReloadablePacketConn
 // Reloadable provides underlying file descriptor through calling File(), which can be used in constructing
@@ -127,6 +131,7 @@ func Listen(network, address string) (l ReloadableListener, err error) {
 // Reload forks and executes the same program (identical file path),
 // sending listener fd to be inherited by child process
 // Reload return child process id; or -1 and error upon any failures.
+// Child process should call SignalParent() to let parent process exit.
 func Reload(reloadables ...Reloadable) (int, error) {
 	bin, err := os.Executable()
 	if err != nil {
@@ -136,14 +141,19 @@ func Reload(reloadables ...Reloadable) (int, error) {
 	if err != nil {
 		return -1, err
 	}
+	r, w, err := os.Pipe()
+	if err != nil {
+		return -1, err
+	}
 	envListeners := make(map[string]int)
-	files := make([]uintptr, magicNumber, magicNumber+len(reloadables))
+	files := make([]uintptr, magicNumber, magicNumber+len(reloadables)+1)
 	files[0], files[1], files[2] = os.Stdin.Fd(), os.Stdout.Fd(), os.Stderr.Fd()
 	for i, re := range reloadables {
 		f, err := re.File()
 		if err != nil {
 			return -1, err
 		}
+		defer f.Close()
 		switch r := re.(type) {
 		case ReloadableListener:
 			envListeners[filename(r.Addr())] = i + magicNumber
@@ -154,6 +164,10 @@ func Reload(reloadables ...Reloadable) (int, error) {
 		}
 		files = append(files, f.Fd())
 	}
+
+	files = append(files, w.Fd())
+	envListeners[pipeFilename] = len(files) - 1
+
 	b, err := json.Marshal(envListeners)
 	if err != nil {
 		return -1, err
@@ -162,11 +176,66 @@ func Reload(reloadables ...Reloadable) (int, error) {
 		return -1, err
 	}
 
-	return syscall.ForkExec(bin, os.Args, &syscall.ProcAttr{
+	pid, err := syscall.ForkExec(bin, os.Args, &syscall.ProcAttr{
 		Dir:   wd,
 		Env:   os.Environ(),
 		Files: files,
 	})
+	if err != nil {
+		return pid, err
+	}
+	// close pipe
+	if err := w.Close(); err != nil {
+		return pid, err
+	}
+	// waiting for child's signal
+	data, err := ioutil.ReadAll(r)
+	if len(data) == 0 {
+		var status syscall.WaitStatus
+		var rusage syscall.Rusage
+		_, e := syscall.Wait4(pid, &status, 0, &rusage)
+		if e != nil {
+			return pid, os.NewSyscallError("wait", e)
+		}
+		return pid, fmt.Errorf("child <%d> status: %s, error: %v", pid, getChildStatus(status), err)
+	}
+	return pid, nil
+}
+
+var signalParentOnce sync.Once
+
+// SignalParent tells parent that child process has finished initialization
+// and parent process can then leave
+func SignalParent() (err error) {
+	signalParentOnce.Do(func() {
+		if fd, ok := inheritedFDs[pipeFilename]; ok {
+			pipe := os.NewFile(fd, "")
+			_, err = pipe.Write([]byte("OK"))
+			pipe.Close()
+		}
+	})
+	return
+}
+
+func getChildStatus(status syscall.WaitStatus) string { // stripped from exec_posix.go
+	res := ""
+	switch {
+	case status.Exited():
+		res = "exit status " + strconv.Itoa(status.ExitStatus())
+	case status.Signaled():
+		res = "signal: " + status.Signal().String()
+	case status.Stopped():
+		res = "stop signal: " + status.StopSignal().String()
+		if status.StopSignal() == syscall.SIGTRAP && status.TrapCause() != 0 {
+			res += " (trap " + strconv.Itoa(status.TrapCause()) + ")"
+		}
+	case status.Continued():
+		res = "continued"
+	}
+	if status.CoreDump() {
+		res += " (core dumped)"
+	}
+	return res
 }
 
 // same style of net/fd_unix.go: *netFD.name()

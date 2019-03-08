@@ -25,3 +25,5 @@ _testmain.go
 
 *.mk
 Makefile
+*.mach
+*.elf
