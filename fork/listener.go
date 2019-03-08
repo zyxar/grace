@@ -14,6 +14,7 @@ import (
 )
 
 const envInheritListener = `FORK_INHERIT_LISTENER`
+const magicNumber = 3 // where listener FDs start from
 
 // Reloadable can be reloaded when forking (by calling Reload()), typically ReloadableListener or ReloadablePacketConn
 // Reloadable provides underlying file descriptor through calling File(), which can be used in constructing
@@ -136,7 +137,7 @@ func Reload(reloadables ...Reloadable) (int, error) {
 		return -1, err
 	}
 	envListeners := make(map[string]int)
-	files := make([]uintptr, 3, 3+len(reloadables))
+	files := make([]uintptr, magicNumber, magicNumber+len(reloadables))
 	files[0], files[1], files[2] = os.Stdin.Fd(), os.Stdout.Fd(), os.Stderr.Fd()
 	for i, re := range reloadables {
 		f, err := re.File()
@@ -145,11 +146,11 @@ func Reload(reloadables ...Reloadable) (int, error) {
 		}
 		switch r := re.(type) {
 		case ReloadableListener:
-			envListeners[filename(r.Addr())] = i + 3
+			envListeners[filename(r.Addr())] = i + magicNumber
 		case ReloadablePacketConn:
-			envListeners[filename(r.LocalAddr())] = i + 3
+			envListeners[filename(r.LocalAddr())] = i + magicNumber
 		default:
-			envListeners[f.Name()] = i + 3
+			envListeners[f.Name()] = i + magicNumber
 		}
 		files = append(files, f.Fd())
 	}
