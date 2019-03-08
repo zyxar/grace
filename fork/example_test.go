@@ -124,6 +124,8 @@ func ExampleReload() {
 	}
 	defer ln.Close()
 
+	SignalParent()
+
 	sigutil.Trap(func(s sigutil.Signal) {
 		switch s {
 		case sigutil.SIGHUP:
@@ -184,6 +186,8 @@ func ExampleReload_multiple() {
 		fmt.Fprintf(w, "3:%v\n", os.Getpid())
 	})
 	go func() { log.Fatal(srv2.Serve(ln2)) }()
+
+	SignalParent()
 
 	sigutil.Trap(func(s sigutil.Signal) {
 		switch s {
