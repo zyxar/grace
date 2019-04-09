@@ -7,7 +7,8 @@ import (
 )
 
 // GetArgs is an auxiliary function for Daemonize, for retrieving correct arguments
-// to start a daemonized child process
+// to start a daemonized child process.
+// Default values would be skipped.
 func GetArgs(set *flag.FlagSet, filterFn func(string) bool) []string {
 	if set == nil {
 		set = flag.CommandLine
@@ -17,12 +18,18 @@ func GetArgs(set *flag.FlagSet, filterFn func(string) bool) []string {
 	}
 	args := make([]string, 0, flag.NFlag()+flag.NArg())
 	visit := func(f *flag.Flag) {
-		args = append(args, "-"+f.Name+"="+f.Value.String())
+		val := f.Value.String()
+		if val != f.DefValue {
+			args = append(args, "-"+f.Name+"="+val)
+		}
 	}
 	if filterFn != nil {
 		visit = func(f *flag.Flag) {
 			if !filterFn(f.Name) {
-				args = append(args, "-"+f.Name+"="+f.Value.String())
+				val := f.Value.String()
+				if val != f.DefValue {
+					args = append(args, "-"+f.Name+"="+val)
+				}
 			}
 		}
 	}
