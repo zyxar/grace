@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/zyxar/grace/sigutil"
 )
@@ -141,6 +142,37 @@ func ExampleReload() {
 	}, sigutil.SIGHUP, sigutil.SIGINT, sigutil.SIGTERM)
 }
 
+func ExampleReloadAll() {
+	ln, err := Listen("tcp", "127.0.0.1:12345")
+	if err != nil {
+		log.Println(err)
+		os.Exit(1)
+	}
+	defer ln.Close()
+
+	myPid := os.Getpid()
+	kl, _ := TCPKeepAlive(ln, time.Minute)
+	http.HandleFunc(`/`, func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(strconv.Itoa(myPid)))
+	})
+	go http.Serve(kl, nil)
+
+	SignalParent()
+
+	sigutil.Watch(func(sigutil.Signal) {
+		pid, err := ReloadAll()
+		if err != nil {
+			log.Println(err)
+			return
+		}
+		log.Printf("[RELOAD] %d -> %d", myPid, pid)
+	}, sigutil.SIGHUP)
+
+	sigutil.Trap(func(s sigutil.Signal) {
+		log.Println("[KILLED] by signal", s)
+	}, sigutil.SIGINT, sigutil.SIGTERM)
+}
+
 func ExampleReload_multiple() {
 	ln, err := Listen("tcp", "127.0.0.1:12345")
 	if err != nil {
@@ -168,6 +200,7 @@ func ExampleReload_multiple() {
 		log.Println(err)
 		os.Exit(1)
 	}
+	defer conn.Close()
 
 	srv := &http.Server{Addr: ln.Addr().String()}
 	srv.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
